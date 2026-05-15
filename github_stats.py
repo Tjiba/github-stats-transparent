@@ -295,7 +295,8 @@ Languages:
 
             self._viewer_login = viewer.get("login", self._viewer_login)
             if (self._viewer_login is not None
-                    and self.username != self._viewer_login):
+                    and (self.username or "").lower()
+                    != self._viewer_login.lower()):
                 self.username = self._viewer_login
                 self.queries.username = self._viewer_login
 
