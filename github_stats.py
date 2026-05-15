@@ -235,6 +235,7 @@ class Stats(object):
                  exclude_langs: Optional[Set] = None,
                  consider_forked_repos: bool = False):
         self.username = username
+        self._viewer_login = None
         self._exclude_repos = set() if exclude_repos is None else exclude_repos
         self._exclude_langs = set() if exclude_langs is None else exclude_langs
         self._consider_forked_repos = consider_forked_repos
@@ -288,16 +289,22 @@ Languages:
                                        contrib_cursor=next_contrib)
             )
             raw_results = raw_results if raw_results is not None else {}
+            viewer = (raw_results
+                      .get("data", {})
+                      .get("viewer", {}))
 
-            self._name = (raw_results
-                          .get("data", {})
-                          .get("viewer", {})
-                          .get("name", None))
+            self._viewer_login = viewer.get("login", self._viewer_login)
+            viewer_changed = (
+                self._viewer_login is not None
+                and (self.username or "").lower() != self._viewer_login.lower()
+            )
+            if viewer_changed:
+                self.username = self._viewer_login
+                self.queries.username = self._viewer_login
+
+            self._name = viewer.get("name", None)
             if self._name is None:
-                self._name = (raw_results
-                              .get("data", {})
-                              .get("viewer", {})
-                              .get("login", "No Name"))
+                self._name = viewer.get("login", "No Name")
 
             contrib_repos = (raw_results
                              .get("data", {})
@@ -459,6 +466,41 @@ Languages:
                 .get("totalContributions", 0)
         return self._total_contributions
 
+    async def _commit_lines_changed(self, repo: str) -> Tuple[int, int]:
+        """
+        :return: line changes from authored commits on the repository default
+                 branch
+        """
+        additions = 0
+        deletions = 0
+        page = 1
+        while True:
+            commits = await self.queries.query_rest(
+                f"/repos/{repo}/commits",
+                params={
+                    "author": self.username,
+                    "page": page,
+                    "per_page": 100,
+                }
+            )
+            if not isinstance(commits, list) or not commits:
+                break
+
+            stats = await asyncio.gather(*[
+                self.queries.query_rest(f"/repos/{repo}/commits/{commit['sha']}")
+                for commit in commits
+                if isinstance(commit, dict) and commit.get("sha")
+            ])
+            for commit in stats:
+                additions += commit.get("stats", {}).get("additions", 0)
+                deletions += commit.get("stats", {}).get("deletions", 0)
+
+            if len(commits) < 100:
+                break
+            page += 1
+
+        return additions, deletions
+
     @property
     async def lines_changed(self) -> Tuple[int, int]:
         """
@@ -468,20 +510,34 @@ Languages:
             return self._lines_changed
         additions = 0
         deletions = 0
+        username = (self.username or "").lower()
         for repo in await self.all_repos:
             r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            repo_additions = 0
+            repo_deletions = 0
+            found_author = False
             for author_obj in r:
                 # Handle malformed response from the API by skipping this repo
                 if (not isinstance(author_obj, dict)
                         or not isinstance(author_obj.get("author", {}), dict)):
                     continue
-                author = author_obj.get("author", {}).get("login", "")
-                if author != self.username:
+                author = author_obj.get("author", {}).get("login", "").lower()
+                if author != username:
                     continue
+                found_author = True
 
                 for week in author_obj.get("weeks", []):
-                    additions += week.get("a", 0)
-                    deletions += week.get("d", 0)
+                    repo_additions += week.get("a", 0)
+                    repo_deletions += week.get("d", 0)
+            if found_author:
+                additions += repo_additions
+                deletions += repo_deletions
+                continue
+
+            fallback_additions, fallback_deletions = \
+                await self._commit_lines_changed(repo)
+            additions += fallback_additions
+            deletions += fallback_deletions
 
         self._lines_changed = (additions, deletions)
         return self._lines_changed
