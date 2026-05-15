@@ -240,6 +240,12 @@ class Stats(object):
         self._exclude_langs = set() if exclude_langs is None else exclude_langs
         self._consider_forked_repos = consider_forked_repos
         self.queries = Queries(username, access_token, session)
+        self._max_fallback_repos = self._parse_positive_int_env(
+            "MAX_FALLBACK_REPOS", 20
+        )
+        self._max_fallback_commits_per_repo = self._parse_positive_int_env(
+            "MAX_FALLBACK_COMMITS_PER_REPO", 300
+        )
 
         self._name = None
         self._stargazers = None
@@ -249,6 +255,17 @@ class Stats(object):
         self._repos = None
         self._lines_changed = None
         self._views = None        
+
+    @staticmethod
+    def _parse_positive_int_env(name: str, default: int) -> int:
+        raw = os.getenv(name)
+        if raw is None:
+            return default
+        try:
+            value = int(raw)
+            return value if value > 0 else default
+        except (TypeError, ValueError):
+            return default
 
     async def to_str(self) -> str:
         """
@@ -466,15 +483,18 @@ Languages:
                 .get("totalContributions", 0)
         return self._total_contributions
 
-    async def _commit_lines_changed(self, repo: str) -> Tuple[int, int]:
+    async def _commit_lines_changed(self, repo: str, max_commits: int) -> Tuple[int, int]:
         """
         :return: line changes from authored commits on the repository default
                  branch
         """
         additions = 0
         deletions = 0
+        processed_commits = 0
         page = 1
         while True:
+            if processed_commits >= max_commits:
+                break
             commits = await self.queries.query_rest(
                 f"/repos/{repo}/commits",
                 params={
@@ -486,16 +506,28 @@ Languages:
             if not isinstance(commits, list) or not commits:
                 break
 
-            stats = await asyncio.gather(*[
-                self.queries.query_rest(f"/repos/{repo}/commits/{commit['sha']}")
+            commit_shas = [
+                commit["sha"]
                 for commit in commits
                 if isinstance(commit, dict) and commit.get("sha")
+            ]
+            remaining = max_commits - processed_commits
+            if remaining <= 0:
+                break
+            commit_shas = commit_shas[:remaining]
+            if not commit_shas:
+                break
+
+            stats = await asyncio.gather(*[
+                self.queries.query_rest(f"/repos/{repo}/commits/{sha}")
+                for sha in commit_shas
             ])
             for commit in stats:
                 additions += commit.get("stats", {}).get("additions", 0)
                 deletions += commit.get("stats", {}).get("deletions", 0)
+            processed_commits += len(commit_shas)
 
-            if len(commits) < 100:
+            if len(commits) < 100 or processed_commits >= max_commits:
                 break
             page += 1
 
@@ -511,6 +543,7 @@ Languages:
         additions = 0
         deletions = 0
         username = (self.username or "").lower()
+        fallback_repos_used = 0
         for repo in await self.all_repos:
             r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
             repo_additions = 0
@@ -534,8 +567,14 @@ Languages:
                 deletions += repo_deletions
                 continue
 
+            if fallback_repos_used >= self._max_fallback_repos:
+                continue
+            fallback_repos_used += 1
             fallback_additions, fallback_deletions = \
-                await self._commit_lines_changed(repo)
+                await self._commit_lines_changed(
+                    repo,
+                    max_commits=self._max_fallback_commits_per_repo
+                )
             additions += fallback_additions
             deletions += fallback_deletions
 
