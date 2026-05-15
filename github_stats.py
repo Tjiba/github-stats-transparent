@@ -530,9 +530,10 @@ Languages:
                 deletions += repo_deletions
                 continue
 
-            repo_additions, repo_deletions = await self._commit_lines_changed(repo)
-            additions += repo_additions
-            deletions += repo_deletions
+            fallback_additions, fallback_deletions = \
+                await self._commit_lines_changed(repo)
+            additions += fallback_additions
+            deletions += fallback_deletions
 
         self._lines_changed = (additions, deletions)
         return self._lines_changed
