@@ -294,9 +294,11 @@ Languages:
                       .get("viewer", {}))
 
             self._viewer_login = viewer.get("login", self._viewer_login)
-            if (self._viewer_login is not None
-                    and (self.username or "").lower()
-                    != self._viewer_login.lower()):
+            viewer_changed = (
+                self._viewer_login is not None
+                and (self.username or "").lower() != self._viewer_login.lower()
+            )
+            if viewer_changed:
                 self.username = self._viewer_login
                 self.queries.username = self._viewer_login
 
@@ -481,7 +483,7 @@ Languages:
                     "per_page": 100,
                 }
             )
-            if not isinstance(commits, list) or len(commits) == 0:
+            if not isinstance(commits, list) or not commits:
                 break
 
             stats = await asyncio.gather(*[
