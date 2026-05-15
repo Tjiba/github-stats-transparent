@@ -58,7 +58,7 @@ class Queries(object):
         :return: deserialized REST JSON output
         """
 
-        for _ in range(60):
+        for _ in range(8):
             headers = {
                 "Authorization": f"token {self.access_token}",
             }
@@ -72,7 +72,6 @@ class Queries(object):
                                                headers=headers,
                                                params=tuple(params.items()))
                 if r.status == 202:
-                    # print(f"{path} returned 202. Retrying...")
                     print(f"A path returned 202. Retrying...")
                     await asyncio.sleep(2)
                     continue
@@ -93,7 +92,6 @@ class Queries(object):
                         continue
                     elif r.status_code == 200:
                         return r.json()
-        # print(f"There were too many 202s. Data for {path} will be incomplete.")
         print("There were too many 202s. Data for this repository will be incomplete.")
         return dict()
 
@@ -542,8 +540,14 @@ Languages:
         deletions = 0
         username = (self.username or "").lower()
         fallback_repos_used = 0
-        for repo in await self.all_repos:
-            r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+
+        all_repos = list(await self.all_repos)
+        repo_stats = await asyncio.gather(*[
+            self.queries.query_rest(f"/repos/{repo}/stats/contributors")
+            for repo in all_repos
+        ])
+
+        for repo, r in zip(all_repos, repo_stats):
             repo_additions = 0
             repo_deletions = 0
             found_author = False
