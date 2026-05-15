@@ -294,7 +294,8 @@ Languages:
                       .get("viewer", {}))
 
             self._viewer_login = viewer.get("login", self._viewer_login)
-            if self._viewer_login is not None:
+            if (self._viewer_login is not None
+                    and self.username != self._viewer_login):
                 self.username = self._viewer_login
                 self.queries.username = self._viewer_login
 
@@ -506,7 +507,7 @@ Languages:
             return self._lines_changed
         additions = 0
         deletions = 0
-        username = self.username.lower()
+        username = (self.username or "").lower()
         for repo in await self.all_repos:
             r = await self.queries.query_rest(f"/repos/{repo}/stats/contributors")
             repo_additions = 0

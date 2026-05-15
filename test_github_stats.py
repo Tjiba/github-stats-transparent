@@ -4,8 +4,7 @@ from github_stats import Stats
 
 
 class LinesChangedTests(unittest.IsolatedAsyncioTestCase):
-    async def test_lines_changed_matches_contributor_stats_case_insensitively(
-            self) -> None:
+    async def test_lines_changed_case_insensitive_match(self) -> None:
         stats = Stats("TJIBA", "token", None)
         stats._repos = {"owner/repo"}
         stats._ignored_repos = set()
