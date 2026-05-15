@@ -512,8 +512,6 @@ Languages:
                 if isinstance(commit, dict) and commit.get("sha")
             ]
             remaining = max_commits - processed_commits
-            if remaining <= 0:
-                break
             commit_shas = commit_shas[:remaining]
             if not commit_shas:
                 break
